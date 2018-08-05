@@ -3,6 +3,7 @@
 A collection of various libraries I've written for the Texas Instruments Tiva C TM4C123G microcontroller. Use/modify however you would like, I will be trying to add example main.c on how to use each of them.
 
 Currently included libraries and their functions
+
 /ser - Serial Communcication
 - Library for handling the sending/receiving of messages over UART. Allows you to ignore received LF/CR as well as remove them from send messages (especially important since CCS terminal doesn't have carriage returns)
 
