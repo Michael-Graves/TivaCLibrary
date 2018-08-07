@@ -28,15 +28,16 @@
 #define TASK_CONDITION_TYPE_BOOL 0
 #define TASK_CONDITION_TYPE_TIMER 1
 #define TASK_CONDITION_TYPE_FUNCTION 2
+#define TASK_CONDITION_TYPE_IDLE 3
 
 //Set this to 0 to setup SysTick elsewhere, will break TimerTasks
 #define SYSTICK_ENABLE 1
 #if SYSTICK_ENABLE == 1
-#define SYSTICK_PERIOD 80000    //80,000 = 1 millisecond @ 80MHz
+//#define SYSTICK_PERIOD 80000    //80,000 = 1 millisecond @ 80MHz
 
 //Declare SysTick Functions explicitly for use in earlier functions
 // Unfortunately this is a bit messy up here, plz forgive me!
-uint8_t InitSysTick(void);
+uint8_t InitSysTick(uint32_t sysTickPeriod);
 void SysTickInterruptHandler(void);
 #endif
 
@@ -70,10 +71,17 @@ struct TaskStructure TaskList[MAX_NUMBER_OF_TASKS];
 uint8_t numOfTaskTimers = 0;
 struct TaskTimerStructure TaskTimerList[MAX_NUMBER_OF_TASKS];
 
+_Bool idle = true;
 
 //#############################################//
 //               Scheduler Functions
 //#############################################//
+
+
+uint8_t VoidInit(void) {
+    // Do nothing.
+    return 0;
+}
 
 /*
  * GetTaskState(taskID)
@@ -168,13 +176,34 @@ uint8_t AddTaskTime(uint8_t (*taskInit)(void), _Bool (*taskExec)(uint8_t), uint3
 }
 
 /*
+ * AddTaskIdle()
+ *  Adds a Task that executes when the scheduler is idle
+ *   This is a conditional task where the condition is automagically set.
+ *  Returns the TaskID
+ */
+uint8_t AddTaskIdle(uint8_t (*taskInit)(void), _Bool (*taskExec)(uint8_t)) {
+    //Add the task to the task list and set to initialize state
+    TaskList[numOfTasks].TaskID = numOfTasks;
+    TaskList[numOfTasks].TaskState = TASK_STATE_INIT;
+    TaskList[numOfTasks].TaskConditionType = TASK_CONDITION_TYPE_IDLE;
+    TaskList[numOfTasks].TaskCondition = &idle;
+    TaskList[numOfTasks].TaskInit = taskInit;
+    TaskList[numOfTasks].TaskExec = taskExec;
+
+    numOfTasks++;
+
+    //Return the taskID that was just created
+    return numOfTasks - 1;
+}
+
+/*
  * InitScheduler()
  *  Initializes the Scheduler, this function configures SysTick timer if enabled.
  */
-uint8_t InitScheduler() {
+uint8_t InitScheduler(uint32_t sysTickPeriod) {
 
 #if SYSTICK_ENABLE == 1
-    InitSysTick();
+    InitSysTick(sysTickPeriod);
 #endif
 
     return 0;
@@ -188,6 +217,9 @@ uint8_t InitScheduler() {
  */
 void UpdateScheduler() {
     uint8_t currentTask = 0;
+    // Reset the idle variable
+    idle = true;
+
     for (currentTask = 0; currentTask < numOfTasks; currentTask++) {
         if(TaskList[currentTask].TaskID != currentTask) break;
         _Bool taskCondition;
@@ -208,7 +240,7 @@ void UpdateScheduler() {
             // pointer type.
 
             switch(TaskList[currentTask].TaskConditionType) {
-            case TASK_CONDITION_TYPE_BOOL: case TASK_CONDITION_TYPE_TIMER:
+            case TASK_CONDITION_TYPE_BOOL: case TASK_CONDITION_TYPE_TIMER: case TASK_CONDITION_TYPE_IDLE:
                 //TaskConditionType is Bool (or Timer)
 
                 //Cast the TaskCondition from void* to a _Bool* and check its value.
@@ -226,6 +258,11 @@ void UpdateScheduler() {
                         TaskList[currentTask].TaskState = TASK_STATE_IDLE;
                     } else {
                         TaskList[currentTask].TaskState = TASK_STATE_EXEC;
+                    }
+
+                    // A task was run, set idle to false (if it wasn't an IDLE task)
+                    if(TaskList[currentTask].TaskConditionType != TASK_CONDITION_TYPE_IDLE) {
+                        idle = false;
                     }
                 }
                 break;
@@ -245,9 +282,13 @@ void UpdateScheduler() {
                     } else {
                         TaskList[currentTask].TaskState = TASK_STATE_EXEC;
                     }
+
+                    // A task was run, set idle to false
+                    idle = false;
                 }
                 break;
             }
+
             break;
 
         case TASK_STATE_EXEC:
@@ -259,6 +300,11 @@ void UpdateScheduler() {
             //Do nothing
             break;
         }
+    }
+
+    if(idle) {
+        // No task was executed, perform some task.
+
     }
 }
 
@@ -273,11 +319,11 @@ uint32_t currentTime = 0;
 //#############################################//
 //                SysTick Functions
 //#############################################//
-uint8_t InitSysTick() {
+uint8_t InitSysTick(uint32_t sysTickPeriod) {
     IntMasterDisable();
     SysTickDisable();
 
-    SysTickPeriodSet(SYSTICK_PERIOD - 1);
+    SysTickPeriodSet(sysTickPeriod - 1);
 
     //Force the counter to reload by writing any value to this register
     NVIC_ST_CURRENT_R = 0;
